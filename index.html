@@ -382,23 +382,26 @@ function callApiWithRetry(action, data, retries) {
 }
 
 async function bootData() {
-  const results = {};
   const calls = [
     ['categories', 'getCategories'],
     ['subCategories', 'getSubCategories'],
     ['settings', 'getSettings'],
     ['metalRates', 'getMetalRates']
   ];
+  const settled = await Promise.allSettled(calls.map(([, action]) => callApiWithRetry(action)));
+
+  const results = {};
   const failures = [];
-  for (const [key, action] of calls) {
-    try {
-      results[key] = await callApiWithRetry(action);
-      if (results[key] && results[key].success === false) failures.push({ action, result: results[key] });
-    } catch (err) {
-      failures.push({ action, error: err.message });
+  settled.forEach((s, i) => {
+    const [key, action] = calls[i];
+    if (s.status === 'fulfilled') {
+      results[key] = s.value;
+      if (s.value && s.value.success === false) failures.push({ action, result: s.value });
+    } else {
       results[key] = {};
+      failures.push({ action, error: s.reason && s.reason.message });
     }
-  }
+  });
 
   if (failures.length) {
     console.error('Startup call(s) failed:', failures);
@@ -781,8 +784,7 @@ function addCategory() {
   }).catch(err => toast(err.message, true));
 }
 async function refreshAllCategoryData() {
-  const cats = await callApiWithRetry('getCategories');
-  const subs = await callApiWithRetry('getSubCategories');
+  const [cats, subs] = await Promise.all([callApiWithRetry('getCategories'), callApiWithRetry('getSubCategories')]);
   STATE.categories = cats.categories || [];
   STATE.subCategories = subs.subCategories || [];
   populateCategoryDropdowns();
